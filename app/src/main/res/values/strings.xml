@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Test Project</string>
+    <string name="title_activity_maps">Test Project</string>
+    <string name="riga_latvia">Riga, Latvia</string>
+    <string name="tallinn_estonia">Tallinn, Estonia</string>
+    <string name="show_nearby_restaurants">Show nearby Restaurants</string>
+    <string name="travel_mode_not_available">No route for the selected travel mode</string>
+    <string name="ok">OK</string>
+    <string name="no_restaurant_found">No restaurant found, try moving the marker</string>
+    <plurals name="total_restaurant_result">
+        <item quantity="one">%d restaurant found</item>
+        <item quantity="other">%d restaurants found</item>
+    </plurals>
+</resources>
