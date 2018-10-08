@@ -2,7 +2,6 @@ package eu.blendit.testproject.model.place
 
 import com.google.android.gms.maps.model.LatLng
 import com.google.gson.annotations.SerializedName
-import com.google.maps.android.clustering.ClusterItem
 
 data class PlaceItem(
 
@@ -44,14 +43,13 @@ data class PlaceItem(
 
         @field:SerializedName("place_id")
         val placeId: String? = null
-) : ClusterItem {
+) {
     val latLng: LatLng
         get() = LatLng(geometry?.location?.lat ?: 0.0, geometry?.location?.lng ?: 0.0)
 
+    val snippet: String = "Rating: $rating"
 
-    override fun getSnippet(): String = "Rating: $rating"
+    val title: String = name ?: ""
 
-    override fun getTitle(): String  = name ?: ""
-
-    override fun getPosition(): LatLng = latLng
+    val position: LatLng = latLng
 }
