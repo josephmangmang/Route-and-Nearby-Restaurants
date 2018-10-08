@@ -267,7 +267,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
             // parse json response to FacebookPlaceResponse object
             val facebookPlaceResponse = Gson().fromJson(it.rawResponse, FacebookPlaceResponse::class.java)
 
-            Log.d(TAG, facebookPlaceResponse?.toString())
+            Log.d(TAG, " ${facebookPlaceResponse?.toString()}")
             // sometimes response is empty or null
             try {
                 // add result to our map
