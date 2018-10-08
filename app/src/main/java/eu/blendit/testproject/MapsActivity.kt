@@ -1,5 +1,6 @@
 package eu.blendit.testproject
 
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.location.Geocoder
 import android.os.Bundle
@@ -7,9 +8,11 @@ import android.util.Log
 import android.view.View
 import android.widget.AdapterView
 import androidx.appcompat.app.AppCompatActivity
+import com.facebook.AccessToken
+import com.facebook.FacebookSdk
+import com.facebook.GraphRequest
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.api.GoogleApiClient
-import com.google.android.gms.location.places.Places
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
@@ -19,7 +22,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.gson.Gson
 import eu.blendit.testproject.model.direction.DirectionResponse
 import eu.blendit.testproject.model.direction.RoutesItem
-import eu.blendit.testproject.model.place.PlaceResponse
+import eu.blendit.testproject.model.facebookplace.FacebookPlaceResponse
 import kotlinx.android.synthetic.main.activity_maps.*
 import org.jetbrains.anko.doAsync
 import org.jetbrains.anko.uiThread
@@ -30,28 +33,26 @@ import java.util.*
 
 class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.OnConnectionFailedListener, GoogleMap.OnMarkerDragListener {
 
-
     private lateinit var mMap: GoogleMap
     private lateinit var originLatLng: LatLng
     private lateinit var destinationLatLng: LatLng
+    // add dragable marker for center point when searching nearby reastaurant
     private var dragableMarker: Marker? = null
     private var restaurantMarkers = ArrayList<Marker>()
 
-    private val onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-        override fun onNothingSelected(parent: AdapterView<*>?) {
+    companion object {
+        // declare a static tag for this activity for logging
+        val TAG = MapsActivity::class.simpleName
+    }
 
-        }
-
+    private val onTravelItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+        override fun onNothingSelected(parent: AdapterView<*>?) {}
         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+            // clean map and recreate route and markers after user select new travel mode
             showNearbyRestaurantSwitch.isChecked = false
             removeRestaurantMarkers()
             prepareRoute()
         }
-    }
-
-
-    companion object {
-        val TAG = MapsActivity::class.simpleName
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +61,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         // Obtain the SupportMapFragment and get notified when the map is ready to be used.
         val mapFragment = supportFragmentManager
                 .findFragmentById(R.id.map) as SupportMapFragment
+
         mapFragment.getMapAsync(this)
-        travelMode.onItemSelectedListener = onItemSelectedListener;
+
+        // set listener to handle travel mode selection
+        travelMode.onItemSelectedListener = onTravelItemSelectedListener;
+
+        // set listener to for handling check change
         showNearbyRestaurantSwitch.setOnCheckedChangeListener { compoundButton, b -> showNearbyRestaurant(b) }
     }
 
@@ -79,6 +85,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         mMap = googleMap
         mMap.setOnMarkerDragListener(this)
         mMap.setOnMapLoadedCallback {
+            // when the map is loaded move the camera to the selected route
             mMap.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds(originLatLng, destinationLatLng), 100))
         }
         prepareRoute()
@@ -93,7 +100,7 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
     override fun onMarkerDragEnd(p0: Marker?) {
         if (showNearbyRestaurantSwitch.isChecked) {
             removeRestaurantMarkers()
-            requestNearbyRestaurant()
+            requestFacebookNearbyPlace()
         }
     }
 
@@ -101,10 +108,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         Log.e(TAG, "${connectionResult.errorMessage}\n $connectionResult");
     }
 
-
+    /**
+     * Prepare the route base on selected origin and destination
+     */
     private fun prepareRoute() {
         mMap.clear()
 
+        // get the static origin and destination for our route
         val originAddress = getString(R.string.riga_latvia)
         val destinationAddress = getString(R.string.tallinn_estonia)
 
@@ -112,11 +122,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         destinationLatLng = getLatLngFromAddress(destinationAddress)
 
 
+        // add origin marker in our map
         val originMarker = MarkerOptions()
                 .position(originLatLng)
                 .title(originAddress)
         mMap.addMarker(originMarker)
 
+        // add destination marker in our map
         val destinationMarker = MarkerOptions()
                 .position(destinationLatLng)
                 .title(destinationAddress)
@@ -125,6 +137,9 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         prepareDirection(originLatLng, destinationLatLng)
     }
 
+    /**
+     * Convert string address to LatLng object
+     */
     private fun getLatLngFromAddress(stringAddress: String): LatLng {
         if (Geocoder.isPresent()) {
             val geocoder = Geocoder(this)
@@ -144,17 +159,24 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         return LatLng(0.0, 0.0);
     }
 
-
-
+    /**
+     * Prepare direction
+     * @param originLatLng the origin address
+     * @param destinationLatLng the destination address
+     */
     private fun prepareDirection(originLatLng: LatLng, destinationLatLng: LatLng) {
+        // this is long task.. do it in separate thread
         doAsync {
-            val directionResponse = RequestDirection(getRequestUrl(originLatLng, destinationLatLng, travelMode.selectedItem.toString())).run()
+            val directionResponse = RequestDirection(getDirectionRequestUrl(originLatLng, destinationLatLng, travelMode.selectedItem.toString())).run()
             val directionPolylines = getDirectionPolylines(directionResponse.routes)
 
             Log.d(TAG, directionResponse.toString())
-            // Get the estimated center of the route
+
+            // any
             uiThread {
                 addPolyline(directionPolylines, mMap)
+
+                // when no route available inform user
                 if (directionPolylines.isEmpty()) {
                     showNearbyRestaurantSwitch.isEnabled = false
                     distanceTextView.text = ""
@@ -166,7 +188,6 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
                     val leg = directionResponse.routes?.get(0)?.legs?.get(0)
                     distanceTextView.text = leg?.distance?.text ?: ""
                     durationTextView.text = leg?.duration?.text ?: ""
-                    // add dragable marker for center point when searching nearby reastaurant
                     dragableMarker?.remove()
                     dragableMarker = mMap.addMarker(MarkerOptions()
                             .title("Drag Me!")
@@ -181,7 +202,13 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
     }
 
-    private fun getRequestUrl(originLatLng: LatLng, destinationLatLng: LatLng, travelMode: String): String {
+    /**
+     * Build the direction request url
+     * @param originLatLng starting point address
+     * @param destinationLatLng destination address
+     * @param travelMode available travel modes Driving, Walking, Bicycling, Transit
+     */
+    private fun getDirectionRequestUrl(originLatLng: LatLng, destinationLatLng: LatLng, travelMode: String): String {
         // Origin of route
         val strOrigin = "origin=" + originLatLng.latitude + "," + originLatLng.longitude
 
@@ -206,9 +233,8 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
 
     private fun showNearbyRestaurant(show: Boolean) {
         if (show) {
-            requestNearbyRestaurant();
+            requestFacebookNearbyPlace()
         } else {
-            // remove restaurant markers
             removeRestaurantMarkers()
         }
     }
@@ -221,42 +247,66 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         totalRestaurantCountTextView.visibility = View.GONE
     }
 
-    private fun requestNearbyRestaurant() {
-        val location = "location=${dragableMarker?.position?.latitude},${dragableMarker?.position?.longitude}"
-        val radius = "&radius=20000"
-        val types = "&types=restaurant"
-        val sensor = "&sensor=true"
-        val key = "&key=${getString(R.string.google_maps_key)}"
-        val parameters = "$location&$radius&$types&$sensor&$key"
-        val url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json?$parameters"
-        doAsync {
-            val placeResponse = RequestPlaces(url).run()
-            Log.d(TAG, placeResponse.toString())
+    private fun requestFacebookNearbyPlace() {
+        // prepare required facebook graph parameters
+        val parameters = Bundle()
+        parameters.putString("type", "place")
+        parameters.putString("fields", "engagement,name,checkins,picture,location")
+        parameters.putString("q", "restaurant")
+        parameters.putString("center", "${dragableMarker?.position?.latitude},${dragableMarker?.position?.longitude}")
+        parameters.putString("distance", "20000")
 
-            uiThread {
-                placeResponse.places?.forEachIndexed { i, placeItem ->
-                    Log.d(TAG, "forEachIndexed of places: $i ${placeItem.toString()}")
-                    val lat = placeItem?.geometry?.location?.lat
-                    val lng = placeItem?.geometry?.location?.lng
-                    val position = LatLng(lat ?: 0.0, lng ?: 0.0)
+        // set app client token
+        FacebookSdk.setClientToken("e949b4399d071b6a22dd65df109b5601")
 
-                    val addedMarker = mMap.addMarker(MarkerOptions()
-                            .position(position)
-                            .title(placeItem?.title)
-                            .snippet(placeItem?.snippet)
-                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_MAGENTA)))
-                    restaurantMarkers.add(addedMarker)
+        // build graph request for searching nearby restaurant
+        val request = GraphRequest.newGraphPathRequest(
+                AccessToken.getCurrentAccessToken(),
+                "/search"
+        ) {
+            // parse json response to FacebookPlaceResponse object
+            val facebookPlaceResponse = Gson().fromJson(it.rawResponse, FacebookPlaceResponse::class.java)
+
+            Log.d(TAG, facebookPlaceResponse?.toString())
+            // sometimes response is empty or null
+            try {
+                // add result to our map
+                facebookPlaceResponse?.data?.forEachIndexed { i, place ->
+                    doAsync {
+                        val lat = place?.location?.latitude
+                        val lng = place?.location?.longitude
+                        val position = LatLng(lat ?: 0.0, lng ?: 0.0)
+                        val bitmap = BitmapFactory.decodeStream(URL(place?.picture?.data?.url).openConnection().getInputStream())
+                        uiThread {
+                            val addedMarker = mMap.addMarker(MarkerOptions()
+                                    .position(position)
+                                    .title(place?.name)
+                                    .snippet(place?.engagement?.socialSentence)
+                                    .icon(BitmapDescriptorFactory.fromBitmap(bitmap)))
+                            restaurantMarkers.add(addedMarker)
+                        }
+                    }
                 }
-                totalRestaurantCountTextView.text = if (restaurantMarkers.size == 0) getString(R.string.no_restaurant_found) else resources.getQuantityString(R.plurals.total_restaurant_result,
-                        restaurantMarkers.size, restaurantMarkers.size)
-                totalRestaurantCountTextView.visibility = View.VISIBLE
-                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(dragableMarker?.position, 9f))
 
+                val totalResult = facebookPlaceResponse?.data?.size ?: 0
+                totalRestaurantCountTextView.text = if (totalResult == 0) getString(R.string.no_restaurant_found) else resources.getQuantityString(R.plurals.total_restaurant_result,
+                        totalResult, totalResult)
+                totalRestaurantCountTextView.visibility = View.VISIBLE
+            } catch (e: NullPointerException) {
+                Log.e(TAG, e.message)
             }
+            // zoom in around the search results
+            mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(dragableMarker?.position, 9f))
         }
+        // set the parameters
+        request.parameters = parameters
+        // execute task in async
+        request.executeAsync()
     }
 
-
+    /**
+     * Add polyline to our map
+     */
     private fun addPolyline(directionPolylines: ArrayList<LatLng>, mMap: GoogleMap) {
         val polylineOptions = PolylineOptions()
         polylineOptions.addAll(directionPolylines)
@@ -265,7 +315,6 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         polylineOptions.geodesic(true)
         mMap.addPolyline(polylineOptions)
     }
-
 
     private fun getDirectionPolylines(routes: List<RoutesItem?>?): ArrayList<LatLng> {
         val directionList = ArrayList<LatLng>()
@@ -322,19 +371,14 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback, GoogleApiClient.On
         return poly
     }
 
+    /**
+     * Class to handle direction request
+     */
     class RequestDirection(private val url: String) {
         fun run(): DirectionResponse {
             Log.d(TAG, url)
             val response = URL(url).readText()
             return Gson().fromJson(response, DirectionResponse::class.java)
-        }
-    }
-
-    class RequestPlaces(private val url: String) {
-        fun run(): PlaceResponse {
-            Log.d(TAG, url)
-            val response = URL(url).readText()
-            return Gson().fromJson(response, PlaceResponse::class.java)
         }
     }
 

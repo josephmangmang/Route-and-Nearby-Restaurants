@@ -7,6 +7,7 @@
     <string name="travel_mode_not_available">No route for the selected travel mode</string>
     <string name="ok">OK</string>
     <string name="no_restaurant_found">No restaurant found, try moving the marker</string>
+    <string name="facebook_app_id">158974385045403</string>
     <plurals name="total_restaurant_result">
         <item quantity="one">%d restaurant found</item>
         <item quantity="other">%d restaurants found</item>
